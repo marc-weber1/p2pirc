@@ -1,4 +1,6 @@
-import select, socket, time
+import asyncio, select, socket, sys
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
 
 def send(sock, string):
     data = string.encode('utf-8')
@@ -49,7 +51,8 @@ class P2PChatConnection:
         print("Connection established.")
         try:
             self.createListener()
-            self.mainLoop()
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.mainLoop())
         finally:
             print('Closing our listener')
             self.listener.close()
@@ -63,7 +66,8 @@ class P2PChatConnection:
 
         try:
             self.createListener()
-            self.mainLoop()
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.mainLoop())
         finally:
             print('Closing our listener')
             self.listener.close()
@@ -78,20 +82,43 @@ class P2PChatConnection:
         the room that we are currently in.
         '''
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.setblocking(0)
         self.listener.bind((self.listenerIP, self.listenerPort))
         self.listener.listen()
         print('Listening on', self.listener.getsockname())
 
-    def mainLoop(self):
+    async def mainLoop(self):
+        asyncio.ensure_future(self.listenForMessages())
+        asyncio.ensure_future(self.listenForClients())
+
+        session = PromptSession()
         while True:
-            time.sleep(0.01)
+            with patch_stdout():
+                result = await session.prompt_async('>>> ')
+            if len(result) > 0 and result[0] == '/':
+                command = result[1:]
+                if command == 'leave':
+                    return
+                else:
+                    print('Unknown command: "%s"' % command)
+            print('Me:', result)
+            for conn in self.connList:
+                # Send the message to everyone else
+                send(conn, 'message')
+                #send(conn, str(self.listener.getsockname()))
+                send(conn, result)
+
+    async def listenForClients(self):
+        while True:
+            await asyncio.sleep(0.01)
             # The other two values from this function are writable and errored.
             # We might use the third one in the future to detect if someone has
             # disconnected (which would mean that their connection socket has closed)
-            readable, _, _ = select.select(self.connList+[self.listener], [], [])
+            readable, _, _ = select.select([self.listener], [], [], 0)
+            #print(readable)
 
             for sock in readable:
-                if sock is self.listener:
+                if sock is self.listener: # should always be True
                     # A new client has tried to connect to our listener
                     s, addr = self.listener.accept()
                     with s:
@@ -107,39 +134,51 @@ class P2PChatConnection:
                             newsock, addr = tmpsock.accept()
                             # We will eventually add newsock to connList, but not right
                             # away, since we need to use connList first
+                        print('===== %s@%s has joined the chat =====' % newsock.getsockname())
 
                     # Tell everyone else to make a new socket for their communication
                     # with the new client
                     for conn in self.connList:
                         send(conn, 'makenewsock')
-                    print('Told everyone to make a new socket for the client')
+                    #print('Told everyone to make a new socket for the client')
 
                     # Everyone else will send a response back containing the address
                     # of the new socket they made
                     newsocks = []
                     for conn in self.connList:
                         newsocks.append(eval(receive(conn)))
-                    print('Received the new socket addresses')
+                    #print('Received the new socket addresses')
 
                     self.connList.append(newsock)
                     send(newsock, str(newsocks))
-                    print('Done!')
-                    
-                else:
-                    # Received data from one of our sockets
-                    data = receive(sock)
-                    if data == 'makenewsock':
-                        # Someone else (call this person C) is telling us to
-                        # make a new socket for a new client to communicate with us
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
-                            tmpsock.bind(('127.0.0.1', 0))
-                            tmpsock.listen()
-                            print('New client has joined. Communication port has address',
-                                  tmpsock.getsockname())
+                    #print('Done!')
 
-                            # Send C the address of the new socket we created.
-                            # C will then send this to the new client, who will connect
-                            # to our socket.
-                            send(sock, str(tmpsock.getsockname()))
-                            newsock, addr = tmpsock.accept()
-                            self.connList.append(newsock)
+    async def listenForMessages(self):
+        while True:
+            await asyncio.sleep(0.01)
+            if not self.connList:
+                continue
+            readable, _, _ = select.select(self.connList, [], [], 0)
+
+            for sock in readable:
+                data = receive(sock)
+                if data == 'makenewsock':
+                    # Someone else (call this person C) is telling us to
+                    # make a new socket for a new client to communicate with us
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
+                        tmpsock.bind(('127.0.0.1', 0))
+                        tmpsock.listen()
+                        #print('New client has joined. Communication port has address',
+                        #      tmpsock.getsockname())
+
+                        # Send C the address of the new socket we created.
+                        # C will then send this to the new client, who will connect
+                        # to our socket.
+                        send(sock, str(tmpsock.getsockname()))
+                        newsock, addr = tmpsock.accept()
+                        self.connList.append(newsock)
+                        print('===== %s@%s has joined the chat =====' % newsock.getsockname())
+                elif data == 'message':
+                    message = receive(sock)
+                    print('%s@%s: %s'%(sock.getsockname()[0],
+                                       sock.getsockname()[1], message))
