@@ -1,11 +1,9 @@
 from argparse import ArgumentParser
 import socket
 
-from .P2PChatConnection import P2PChatConnection
+from .P2PChat import P2PChat
 
-DEFAULT_PORT_MIN = 38500 #Needs this port for the server, and one more port for each person in the chat
-# Port 0 means that we let the OS choose a free port
-DEFAULT_PORT_MIN = 0
+DEFAULT_LISTENING_PORT = 38500 #Needs this port for the server, and one more port for each person in the chat, 0 means the OS chooses a free port
 
 def main():
         print("Parsing arguments...")
@@ -13,13 +11,14 @@ def main():
         
         parser.add_argument('--ip',metavar='X.X.X.X',default='127.0.0.1',
                                                 help="The IP of one of the people currently in the group chat")
-        parser.add_argument('--port',type=int,metavar='N',default=DEFAULT_PORT_MIN,
+        parser.add_argument('--port',type=int,metavar='N',default=DEFAULT_LISTENING_PORT,
                                                 help="The port of that person's server you want to connect to")
-        parser.add_argument('--local-port',type=int,metavar='N',default=DEFAULT_PORT_MIN,
+        parser.add_argument('--local-port',type=int,metavar='N',default=DEFAULT_LISTENING_PORT,
                                                 help="The port to host your connection server on")
         parser.add_argument('--key-file',metavar='*.json',default='id-rsa.json',
                                                 help="The file containing the key database")
-        parser.add_argument('--new',action='store_true',help="The file containing the key database")
+        parser.add_argument('--new',action='store_true',
+                                                help="Creates a new room")
         
         args = parser.parse_args()
         
@@ -49,7 +48,7 @@ def main():
         
         #Everything is good at this point, start the class
         
-        con = P2PChatConnection(args.local_port,args.key_file)
+        con = P2PChat(args.local_port,args.key_file)
         if args.new:
                 con.createNewRoom()
         else:

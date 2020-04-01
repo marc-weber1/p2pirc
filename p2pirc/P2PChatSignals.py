@@ -1,0 +1,4 @@
+
+
+P2P_CHAT_NEWCONNECTION = "makenewsock"
+P2P_CHAT_NEWMESSAGE = "message"
