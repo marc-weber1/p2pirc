@@ -1,0 +1,3 @@
+*.json
+*.private_key
+p2pirc/__pycache__/*
