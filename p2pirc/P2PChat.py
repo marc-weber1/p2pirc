@@ -7,6 +7,9 @@ from .P2PChatSignals import *
 
 
 class P2PChat:
+    key_database = {}
+    key_database_file = ""
+
     def __init__(self, local_port_listener, key_file):
         print("Connection object initialized.")
         ''' self.connList is a list of sockets we use to communicate with other
@@ -14,6 +17,8 @@ class P2PChat:
         self.listenerIP = '127.0.0.1'
         self.listenerPort = local_port_listener
         self.connList = []
+        
+        #THEN LOAD THE KEY DATABASE FILE
             
     def connect(self, IP, port):
         '''
@@ -22,8 +27,11 @@ class P2PChat:
         '''
         
         firstconn = P2PChatConnection("JOINDIRECT",addr=[IP,port])
+        firstconn.waitForAccept() # Server accepts first
 
-        #CHECK HERE WITH THE USER IF THEIR PUBKEY IS OK FIRST
+        #CHECK HERE WITH THE USER IF THE ENDPOINT'S PUBKEY IS OK FIRST, RANDOMART?
+        # firstconn.pubkey()
+        firstconn.acceptConnection()
 
         # The person we connect to will now tell everyone else to create
         # a socket for us to use. Then that person will send us the
@@ -33,6 +41,8 @@ class P2PChat:
         self.connList = [firstconn]
         for addr in addrlist:
             conn = P2PChatConnection("JOININDIRECT",addr=addr)
+            conn.waitForAccept() #This blocks, more parallel way?
+            conn.acceptConnection()
             self.connList.append(conn)
         
         print("Connection established.")
@@ -117,6 +127,10 @@ class P2PChat:
                         newconn = P2PChatConnection("NEWDIRECTCLIENT",listener=s)
                         
                         # CHECK HERE WITH THE USER IF THE CLIENT'S PUBKEY IS OK FIRST !!!
+                        # newconn.pubkey()
+                        newconn.acceptConnection()
+                        
+                        newconn.waitForAccept()
                         
                         print('===== %s@%s has joined the chat =====' % newconn.getsockname())
 
@@ -152,7 +166,9 @@ class P2PChat:
                     newconn = P2PChatConnection("NEWINDIRECTCLIENT",connection=conn)
                     
                     #OPTIONALLY CHECK HERE IF THE CLIENT'S PUBKEY IS OK FIRST?
+                    newconn.acceptConnection()
                     
+                    newconn.waitForAccept()
                     self.connList.append(newconn)
                     print('===== %s@%s has joined the chat =====' % newconn.getsockname())
                 elif data == P2P_CHAT_NEWMESSAGE:
