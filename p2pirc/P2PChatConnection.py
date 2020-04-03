@@ -4,20 +4,24 @@ from noise.connection import NoiseConnection, Keypair
 from .P2PChatSignals import *
 
 
-# FUNCTIONS TO REMOVE: so noone uses them by accident since they are PLAINTEXT
-def send(sock, string):
+# These are plaintext send/receive functions. If you want encrypted versions,
+# use P2PChatConnection.send() or .receive().
+def sendPT(sock, string):
     data = string.encode('utf-8')
     lendata = len(data).to_bytes(4, 'big')
     sock.sendall(lendata + data)
 
-def receive(sock):
+def receivePT(sock):
     length = int.from_bytes(sock.recv(4), 'big')
     return sock.recv(length).decode('utf-8')
 
 
-#P2PChatConnection represents a single connection between you and another person in the group chat, abstracting for who is the "server" and who is the "client"
-
 class P2PChatConnection:
+    '''
+    P2PChatConnection represents a single connection between you and another
+    person in the group chat, abstracting for who is the "server" and who is
+    the "client"
+    '''
     private_key_file = ""
 
     #addr is an [IP,port], Listener is a listener socket, connection is a P2PChatConnection
@@ -30,7 +34,7 @@ class P2PChatConnection:
                 print('Connected')
 
                 # 'addr' is the ip/port of the socket we need to connect to
-                self.addr = json.loads(receive(s)) #Maybe replace the receive with a bytewise function later
+                self.addr = json.loads(receivePT(s))
 
                 # 'firstsock' will be the first element of self.connList.
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -54,7 +58,7 @@ class P2PChatConnection:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
                 tmpsock.bind(('127.0.0.1', 0))
                 tmpsock.listen()
-                send(listener, json.dumps(tmpsock.getsockname())) #Maybe replace the send with a bytewise function later
+                sendPT(listener, json.dumps(tmpsock.getsockname()))
                 self.sock, self.addr = tmpsock.accept()
         
         
