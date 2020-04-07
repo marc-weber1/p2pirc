@@ -153,7 +153,7 @@ class P2PChat:
 
     async def listenForMessages(self):
         while True:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.01) #Maybe make this not happen if the serverload is high, i.e. if it takes 0.01 seconds to process a request then don't wait
             if not self.connList:
                 continue
             readable, _, _ = select.select(self.connList, [], [], 0)
