@@ -105,11 +105,13 @@ class P2PChatConnection:
         elif self.handshake_role == "client":
             data = self.sock.recv(2048)
             stat_rem_pubkey = self.noise.read_message(data)
+            self.handshake_role = "finished"
+            assert self.noise.handshake_finished
             
         return True #Will sometimes not return true in the future
     
     def pubkey(self): #returns a x25519PublicKey object
-        return self.noise.noise_protocol.keypairs['rs'].public   #Remote Static
+        return self.noise.noise_protocol.keypairs['rs']
     
     
     def send(self,string):
