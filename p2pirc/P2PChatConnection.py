@@ -131,6 +131,8 @@ class P2PChatConnection:
 
     def receive(self):
         len_data = self.sock.recv(4)
+        if not len_data:
+            return ''
         length = int.from_bytes(len_data, 'big')
         plaintext_message = self.noise.decrypt(self.sock.recv(length))
         return plaintext_message.decode('utf-8')

@@ -110,7 +110,7 @@ class P2PChat:
             # The other two values from this function are writable and errored.
             # We might use the third one in the future to detect if someone has
             # disconnected (which would mean that their connection socket has closed)
-            readable, _, _ = select.select([self.listener], [], [], 0)
+            readable,_,_ = select.select([self.listener], [], [], 0)
             #print(readable)
 
             for sock in readable:
@@ -156,11 +156,20 @@ class P2PChat:
             await asyncio.sleep(0.01) #Maybe make this not happen if the serverload is high, i.e. if it takes 0.01 seconds to process a request then don't wait
             if not self.connList:
                 continue
-            readable, _, _ = select.select(self.connList, [], [], 0)
-
+            readable, _, errored = select.select(self.connList, [], self.connList, 0)
+            if errored:
+                print('CCC', errored)
             for conn in readable:
+                if conn in errored:
+                    continue
                 data = conn.receiveSignal()
-                if data == P2P_CHAT_NEWCONNECTION:
+                if not data:
+                    # Read zero bytes, that means the other end has disconnected
+                    print('===== %s@%s has left the chat =====' % conn.getsockname())
+                    conn.getsockname()
+                    conn.close()
+                    self.connList.remove(conn)
+                elif data == P2P_CHAT_NEWCONNECTION:
                     # Someone else (call this person C) is telling us to
                     # make a new socket for a new client to communicate with us
                     newconn = P2PChatConnection("NEWINDIRECTCLIENT",connection=conn)
@@ -175,3 +184,9 @@ class P2PChat:
                     message = conn.receiveMessage()
                     print('%s@%s: %s'%(conn.getsockname()[0],
                                        conn.getsockname()[1], message))
+
+            for conn in errored:
+                print('===== %s@%s has left the chat =====' % conn.getsockname())
+                conn.getsockname()
+                conn.close()
+                self.connList.remove(conn)
