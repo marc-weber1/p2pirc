@@ -6,10 +6,10 @@ from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat
 from .P2PChat import P2PChat
 from .P2PChatConnection import P2PChatConnection
 
-DEFAULT_LISTENING_PORT = 38500 #Needs this port for the server, and one more port for each person in the chat, 0 means the OS chooses a free port
+DEFAULT_LISTENING_PORT = 8123 #Needs this port for the server, and one more port for each person in the chat, 0 means the OS chooses a free port
 
 def main():
-    print("Parsing arguments...")
+    #print("Parsing arguments...")
     parser = ArgumentParser(description="A peer-to-peer group chat proof of concept.")
     
     parser.add_argument('--ip',metavar='X.X.X.X',default='127.0.0.1',
@@ -45,8 +45,9 @@ def main():
             
     try:
         fp = open(args.key_database, "a+")  #Creates file if it doesn't exist
+        if(fp.tell() == 0):
+            fp.write("{}") #A new empty json database
         fp.close()
-        P2PChat.key_database_file = args.key_database
     except IOError:
         print("Invalid key database %s." %args.key_database)
         return
@@ -64,7 +65,7 @@ def main():
         
     #Everything is good at this point, start the class
     
-    con = P2PChat(args.local_port,args.key_file)
+    con = P2PChat(args.local_port,args.key_database,args.key_file)
     if args.new:
         con.createNewRoom()
     else:

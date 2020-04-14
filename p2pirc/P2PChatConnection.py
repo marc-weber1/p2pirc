@@ -1,8 +1,9 @@
 import socket, json
+import string
 from noise.connection import NoiseConnection, Keypair
 
-from cryptography.hazmat.primitives.serialization import PublicFormat
-from cryptography.hazmat.primitives.serialization import Encoding
+#from cryptography.hazmat.primitives.serialization import PublicFormat
+#from cryptography.hazmat.primitives.serialization import Encoding
 
 from .P2PChatSignals import *
 
@@ -25,7 +26,7 @@ class P2PChatConnection:
     person in the group chat, abstracting for who is the "server" and who is
     the "client"
     '''
-    private_key_file = ""
+    private_key_file = "" # Maybe find a way to make this dependent on the P2PChat instance?
 
     #addr is an [IP,port], Listener is a listener socket, connection is a P2PChatConnection
     #After this, self.sock, self.addr are guaranteed to exist
@@ -34,12 +35,10 @@ class P2PChatConnection:
         if role == "JOINDIRECT": #pwnat or open port
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect(tuple(addr))
-                print('Connected')
 
                 # 'addr' is the ip/port of the socket we need to connect to
-                self.addr = json.loads(receivePT(s))
+                self.addr = json.loads(receivePT(s)) #ENCRYPT THIS?
 
-                # 'firstsock' will be the first element of self.connList.
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect(tuple(self.addr))
         elif role == "JOININDIRECT": #chownat
@@ -49,7 +48,7 @@ class P2PChatConnection:
         elif role == "NEWINDIRECTCLIENT": #chownat
             target_addr = json.loads(connection.receive())
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
-                tmpsock.bind(('127.0.0.1', 0))
+                tmpsock.bind(('127.0.0.1', 0)) #Broken on non-local right now
                 tmpsock.listen()
 
                 # Send C the address of the new socket we created.
@@ -59,11 +58,10 @@ class P2PChatConnection:
                 self.sock, self.addr = tmpsock.accept()
         elif role == "NEWDIRECTCLIENT": #pwnat or open port; don't need their IP
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
-                tmpsock.bind(('127.0.0.1', 0))
+                tmpsock.bind(('127.0.0.1', 0)) #Broken on non-local right now
                 tmpsock.listen()
-                sendPT(listener, json.dumps(tmpsock.getsockname()))
+                sendPT(listener, json.dumps(tmpsock.getsockname())) #ENCRYPT THIS??
                 self.sock, self.addr = tmpsock.accept()
-        
         
         # Handshake now that the socket is open
         # XX: server - confidentially receive their static pubkey, verify it, then send your static back
@@ -78,6 +76,7 @@ class P2PChatConnection:
             stat_rem_pubkey = self.sock.recv(96)
             payload = self.noise.read_message(stat_rem_pubkey)
             self.handshake_role = "server"
+            self.pubkey = self.noise.noise_protocol.handshake_state.rs.public_bytes
             #self.pubkey() is now guaranteed to exist
                 
         elif role == "JOINDIRECT" or role == "JOININDIRECT": #"client"
@@ -86,7 +85,6 @@ class P2PChatConnection:
             data = self.sock.recv(32)
             eph_rem_pubkey = self.noise.read_message(data)
             cipher_stat_loc_pubkey = self.noise.write_message() #timestamp would be cool here? or random numbers
-            print("Our pubkey: " + str(self.noise.noise_protocol.keypairs['s'].public.public_bytes(Encoding.Raw,PublicFormat.Raw)))
             self.sock.sendall(cipher_stat_loc_pubkey)
             self.handshake_role = "client"
         
@@ -96,11 +94,11 @@ class P2PChatConnection:
     def acceptConnection(self):
         if self.handshake_role == "server":
             cipher_stat_loc_pubkey = self.noise.write_message()
-            print("Our pubkey: " + str(self.noise.noise_protocol.keypairs['s'].public.public_bytes(Encoding.Raw,PublicFormat.Raw)))
             self.sock.sendall(cipher_stat_loc_pubkey)
         elif self.handshake_role == "client":
             self.handshake_role = "finished" #handshake complete
             assert self.noise.handshake_finished
+            self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
             # Send confirmation packet
     
     def rejectConnection(self):
@@ -110,18 +108,17 @@ class P2PChatConnection:
         if self.handshake_role == "server":
             self.handshake_role = "finished"
             assert self.noise.handshake_finished
+            self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
             # Receive confirmation packet
         elif self.handshake_role == "client":
             data = self.sock.recv(64)
             stat_rem_pubkey = self.noise.read_message(data)
+            #print(vars(self.noise.noise_protocol))
+            #self.pubkey is now guaranteed to exist (IF IT WASNT BROKEN - FIXIT)
             self.handshake_role = "finished"
             assert self.noise.handshake_finished
             
         return True #Will sometimes not return true in the future
-    
-    def pubkey(self): #returns a x25519PublicKey object
-        print(vars(self.noise.noise_protocol))
-        return self.noise.noise_protocol.keypairs['rs']
     
     
     def send(self,string):
@@ -159,8 +156,10 @@ class P2PChatConnection:
     def receiveOpenAddress(self):
         return json.loads(self.receive())
         
-    def receiveMessage(self): #THIS NEEDS ENCODING
-        return self.receive()
+    def receiveMessage(self):
+        # Hopefully this is good enough for encoding
+        st = self.receive().replace('\n',' ') #Newline filtering, or else someone can fake someone else's message
+        return "".join(s for s in st if s in string.printable) #Non-printable filtering, so you can't crash anyone
         
     def receiveSignal(self):
         return self.receive()

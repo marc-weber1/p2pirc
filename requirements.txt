@@ -2,3 +2,4 @@ NoiseProtocol>=0.3.1
 argparse>=1.4
 prompt-toolkit>=3.0.5
 asyncio>=3.4.3
+pystun>=0.1.0
