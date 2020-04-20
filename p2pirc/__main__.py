@@ -16,8 +16,8 @@ def main():
                         help="The IP of one of the people currently in the group chat")
     parser.add_argument('--port',type=int,metavar='N',default=DEFAULT_LISTENING_PORT,
                         help="The port of that person's server you want to connect to")
-    parser.add_argument('--local-port',type=int,metavar='N',default=DEFAULT_LISTENING_PORT,
-                        help="The port to host your connection server on")
+    parser.add_argument('--entrypoint',type=int,metavar='N',default=-1,
+                        help="The port to host your connection server on; set to -1 if you don't want people to join off you")
     parser.add_argument('--key-database',metavar='*.json',default='id-25519.json',
                         help="The file containing the key database - if nonexistent, a new one will be made")
     parser.add_argument('--key-file',metavar='*.private_key',default='id-25519.private_key',
@@ -39,8 +39,8 @@ def main():
         print("Invalid port %d." %args.port)
         return
             
-    if args.local_port<0 or args.local_port>65535:
-        print("Invalid local port %d." %args.local_port)
+    if args.entrypoint>65535:
+        print("Invalid local port %d." %args.entrypoint)
         return
             
     try:
@@ -62,10 +62,13 @@ def main():
         print("Invalid key file %s." %args.key_file)
         return
     
+    if args.new and args.entrypoint<0:
+        print("Can't start a new chat without an entrypoint; please specify port")
+        return
         
     #Everything is good at this point, start the class
     
-    con = P2PChat(args.local_port,args.key_database,args.key_file)
+    con = P2PChat(args.entrypoint,args.key_database,args.key_file)
     if args.new:
         con.createNewRoom()
     else:

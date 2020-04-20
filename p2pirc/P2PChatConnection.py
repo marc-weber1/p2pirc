@@ -73,7 +73,7 @@ class P2PChatConnection:
             self.noise.start_handshake()
             eph_loc_pubkey = self.noise.write_message() #any payload?? like random numbers
             self.sock.sendall(eph_loc_pubkey)
-            stat_rem_pubkey = self.sock.recv(96)
+            stat_rem_pubkey = self.sock.recv(128)
             payload = self.noise.read_message(stat_rem_pubkey)
             self.handshake_role = "server"
             self.pubkey = self.noise.noise_protocol.handshake_state.rs.public_bytes
@@ -82,7 +82,7 @@ class P2PChatConnection:
         elif role == "JOINDIRECT" or role == "JOININDIRECT": #"client"
             self.noise.set_as_responder()
             self.noise.start_handshake()
-            data = self.sock.recv(32)
+            data = self.sock.recv(128)
             eph_rem_pubkey = self.noise.read_message(data)
             cipher_stat_loc_pubkey = self.noise.write_message() #timestamp would be cool here? or random numbers
             self.sock.sendall(cipher_stat_loc_pubkey)
@@ -96,6 +96,9 @@ class P2PChatConnection:
             cipher_stat_loc_pubkey = self.noise.write_message()
             self.sock.sendall(cipher_stat_loc_pubkey)
         elif self.handshake_role == "client":
+            #agreed_key = self.noise.write_message()
+            #self.sock.sendall(agreed_key)
+        
             self.handshake_role = "finished" #handshake complete
             assert self.noise.handshake_finished
             self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
@@ -106,12 +109,15 @@ class P2PChatConnection:
     
     def waitForAccept(self):
         if self.handshake_role == "server":
+            #data = self.sock.recv(128)
+            #self.noise.read_message(data)
+        
             self.handshake_role = "finished"
             assert self.noise.handshake_finished
             self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
             # Receive confirmation packet
         elif self.handshake_role == "client":
-            data = self.sock.recv(64)
+            data = self.sock.recv(128)
             stat_rem_pubkey = self.noise.read_message(data)
             #print(vars(self.noise.noise_protocol))
             #self.pubkey is now guaranteed to exist (IF IT WASNT BROKEN - FIXIT)

@@ -79,16 +79,17 @@ class P2PChat:
         
         print("Connection established.")
         try:
-            self.createListener()
+            if self.listenerPort >= 0:
+                self.createListener()
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self.mainLoop())
         finally:
-            print('Closing our listener')
-            self.listener.close()
+            if self.listenerPort >= 0:
+                print('Closing our listener')
+                self.listener.close()
             print('Closing our connection ports')
             for conn in self.connList:
                 conn.close()
-            print('Done!')
 
     def createNewRoom(self):
         self.connList = []
@@ -118,7 +119,8 @@ class P2PChat:
 
     async def mainLoop(self):
         asyncio.ensure_future(self.listenForMessages())
-        asyncio.ensure_future(self.listenForClients())
+        if self.listenerPort >= 0:
+            asyncio.ensure_future(self.listenForClients())
 
         session = PromptSession()
         while True:
