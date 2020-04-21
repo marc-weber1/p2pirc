@@ -2,8 +2,9 @@ import socket, json
 import string
 from noise.connection import NoiseConnection, Keypair
 
-#from cryptography.hazmat.primitives.serialization import PublicFormat
-#from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.serialization import PublicFormat
+from cryptography.hazmat.primitives.serialization import Encoding
 
 from .P2PChatSignals import *
 
@@ -95,6 +96,11 @@ class P2PChatConnection:
         if self.handshake_role == "server":
             cipher_stat_loc_pubkey = self.noise.write_message()
             self.sock.sendall(cipher_stat_loc_pubkey)
+            assert self.noise.handshake_finished
+            # Send pubkey
+            encrypted_pubkey = self.noise.encrypt( self.getLocalPubkey() )
+            lendata = len(encrypted_pubkey).to_bytes(4, 'big')
+            self.sock.sendall( lendata + encrypted_pubkey )
         elif self.handshake_role == "client":
             #agreed_key = self.noise.write_message()
             #self.sock.sendall(agreed_key)
@@ -102,30 +108,30 @@ class P2PChatConnection:
             self.handshake_role = "finished" #handshake complete
             assert self.noise.handshake_finished
             self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
-            # Send confirmation packet
+            # HANDSHAKE COMPLETE
+            
     
     def rejectConnection(self):
         pass #implementing soon
     
     def waitForAccept(self):
         if self.handshake_role == "server":
-            #data = self.sock.recv(128)
-            #self.noise.read_message(data)
+            #agreed_key = self.sock.recv(128)
+            #self.noise.read_message(agreed_key)
         
             self.handshake_role = "finished"
             assert self.noise.handshake_finished
             self.sock.settimeout(5.0) # REMEMBER TO HANDLE THIS with except socket.timeout, this is so clients can't freeze forever
-            # Receive confirmation packet
+            # HANDSHAKE COMPLETE
         elif self.handshake_role == "client":
             data = self.sock.recv(128)
             stat_rem_pubkey = self.noise.read_message(data)
-            #print(vars(self.noise.noise_protocol))
-            #self.pubkey is now guaranteed to exist (IF IT WASNT BROKEN - FIXIT)
-            self.handshake_role = "finished"
             assert self.noise.handshake_finished
+            #Receive pubkey
+            lendata = int.from_bytes(self.sock.recv(4),'big')
+            self.pubkey = self.noise.decrypt(self.sock.recv(lendata))
             
         return True #Will sometimes not return true in the future
-    
     
     def send(self,string):
         encrypted_data = self.noise.encrypt(string.encode('utf-8'))
@@ -175,3 +181,8 @@ class P2PChatConnection:
     
     def fileno(self): #So you can call select() on a list of P2PChatConnections
         return self.sock.fileno()
+
+    def getLocalPubkey(self):
+        with open(P2PChatConnection.private_key_file,"rb") as f:
+            privkey = X25519PrivateKey.from_private_bytes(f.read())
+            return privkey.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)
