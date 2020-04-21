@@ -1,8 +1,6 @@
 import asyncio, select, socket, sys, os, base64, json
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
 
 from .P2PChatConnection import P2PChatConnection
 from .P2PChatSignals import *
@@ -20,7 +18,7 @@ def gen_random_nickname(): #Untested
 # 1 - all members of self.connList should have a pubkey, and have a noise where noise.handshake_finished is true
 class P2PChat:
 
-    def __init__(self, local_port_listener, key_database, key_file):
+    def __init__(self, local_port_listener, key_database, key_file, ui_class):
         ''' self.connList is a list of sockets we use to communicate with other
         people in the chat room '''
         self.listenerIP = '' #Binds to all IPs? Might be a security flaw, should only be 129.168.x.x for the intended router or 127.0.x.x for testing
@@ -30,6 +28,9 @@ class P2PChat:
         
         #Print out the pubkey?
         #print("Our pubkey: " + str(?.public_bytes(Encoding.Raw,PublicFormat.Raw)))
+        
+        self.private_key_file = key_file
+        self.ui_class = ui_class
         
         #Then load the key database file
         try:
@@ -148,10 +149,9 @@ class P2PChat:
         if self.listenerPort >= 0:
             asyncio.ensure_future(self.listenForClients())
 
-        session = PromptSession()
+        ui = self.ui_class()
         while True:
-            with patch_stdout():
-                result = await session.prompt_async('>>> ') #Try to un-print the thing typed in after
+            result = await ui.prompt()
             if len(result) > 0 and result[0] == '/':
                 command = result[1:].split(' ')
                 if len(command) == 0:
