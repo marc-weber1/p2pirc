@@ -16,7 +16,8 @@ def gen_unique_nickname(pubkey): #Accessibility problem: l and I might look simi
 def gen_random_nickname(): #Untested
     return base64.b64encode( os.urandom(6) ).decode("utf-8")
 
-
+# Test assertions:
+# 1 - all members of self.connList should have a pubkey, and have a noise where noise.handshake_finished is true
 class P2PChat:
 
     def __init__(self, local_port_listener, key_database, key_file):
@@ -49,7 +50,7 @@ class P2PChat:
                 pubkey_database_string = json.dumps( {base64.b64encode(k).decode("utf-8"): v for k,v in self.pubkey_database.items()}, indent=2 )
                 f_dat.write( pubkey_database_string )
                 f_dat.close()
-                print("Pubkey saved to %s." %self.key_database_filename)
+                print("Pubkeys saved to %s." %self.key_database_filename)
             except IOError:
                 print("ERROR: Failed to save the pubkey database %s. Any peers accepted during this group chat will not be saved as trusted.")
         
@@ -63,24 +64,44 @@ class P2PChat:
         print("Sent public key to entrypoint. Waiting for them to accept ...")
         firstconn.waitForAccept() # Server accepts first
 
+        pubkey_added = False
         if firstconn.pubkey in self.pubkey_database.keys():
+            print("Confirmed entrypoint identity.")
             firstconn.acceptConnection()
         else:
             #CHECK HERE WITH THE USER IF THE ENDPOINT'S PUBKEY IS OK FIRST, RANDOMART?
-            self.pubkey_database[ firstconn.pubkey ] = self.getPubkeyNickname(firstconn.pubkey)
+            nick = self.getPubkeyNickname(firstconn.pubkey)
+            print("WARNING: Entrypoint pubkey was not recognized. Adding it to the database.")
+            
+            self.pubkey_database[ firstconn.pubkey ] = nick
+            pubkey_added = True
             firstconn.acceptConnection()
-
+            
+        print("  pubkey: %s" %base64.b64encode(firstconn.pubkey).decode("utf-8"))
+        print("  nickname: %s" %self.pubkey_database[firstconn.pubkey])
+        
+        
         # The person we connect to will now tell everyone else to create
         # a socket for us to use. Then that person will send us the
         # addresses of the sockets they created.
         addrlist = firstconn.receiveAddressList()
+        print("Other users in chat:")
 
         self.connList = [firstconn]
         for addr in addrlist:
             conn = P2PChatConnection("JOININDIRECT",addr=addr)
             conn.waitForAccept() #This blocks, more parallel way?
-            conn.acceptConnection()
+            if conn.pubkey in self.pubkey_database.keys():
+                conn.acceptConnection()
+            else:
+                self.pubkey_database[ conn.pubkey ] = self.getPubkeyNickname(conn.pubkey)
+                pubkey_added = True
+                conn.acceptConnection()
+            print("  %s" %self.pubkey_database[ conn.pubkey ])
             self.connList.append(conn)
+        
+        if pubkey_added:
+            self.save_pubkey_database()
         
         print("Connection established.")
         try:
@@ -144,8 +165,12 @@ class P2PChat:
                     
                 elif command[0] == 'accept':  #Accept a new client
                     if len(command) < 2 or not command[1] in self.waitingList.keys():
-                        print("Here are the connections waiting to be accepted:")
-                        # ...
+                        if len(self.waitingList.keys()) == 0:
+                            print("There are no connections waiting to be accepted.")
+                        else:
+                            print("Here are the connections waiting to be accepted:")
+                            for i in self.waitingList.keys():
+                                print("  "+i)
                     else:
                         self.pubkey_database[ self.waitingList[ command[1] ].pubkey ] = command[1]
                         self.save_pubkey_database()
@@ -153,8 +178,17 @@ class P2PChat:
                         del self.waitingList[ command[1] ]
                     
                 elif command[0] == 'nick': #Rename a known client
-                    pass #Will implement once clientside pubkey works
-                    
+                    if len(command) < 3:
+                        print("Usage: /nick current_name new_name")
+                    elif not command[1] in self.pubkey_database.values():
+                        print("Can't find user %s" %command[1])
+                    else:
+                        for pubkey,nickname in self.pubkey_database.items():
+                            if nickname == command[1]:
+                                self.pubkey_database[pubkey] = command[2]
+                                self.save_pubkey_database()
+                                break
+                
                 else:
                     print('Unknown command: "%s"' % command)
             
@@ -170,13 +204,13 @@ class P2PChat:
         newconn.acceptConnection()
         newconn.waitForAccept() #This blocks, maybe do this entire function on a new thread
                     
-        print('===== %s@%s has joined the chat =====' % newconn.getsockname())
+        print('===== %s has joined the chat =====' %self.pubkey_database[newconn.pubkey] )
 
         # Tell everyone else to make a new socket for their communication
         # with the new client
         for conn in self.connList:
             try:
-                conn.sendNewConnection(addr)
+                conn.sendNewConnection(newconn.addr)
             except socket.error:
                 pass
         #print('Told everyone to make a new socket for the client')
@@ -247,7 +281,7 @@ class P2PChat:
                 data = conn.receiveSignal()
                 if not data:
                     # Read zero bytes, that means the other end has disconnected
-                    print('===== %s@%s has left the chat =====' % conn.getsockname())
+                    print('===== %s has left the chat =====' %self.pubkey_database[conn.pubkey] )
                     conn.getsockname()
                     conn.close()
                     self.connList.remove(conn)
@@ -256,27 +290,39 @@ class P2PChat:
                     # make a new socket for a new client to communicate with us
                     newconn = P2PChatConnection("NEWINDIRECTCLIENT",connection=conn)
                     
-                    #OPTIONALLY CHECK HERE IF THE CLIENT'S PUBKEY IS OK FIRST?
-                    newconn.acceptConnection()
+                    if newconn.pubkey in self.pubkey_database.items():
+                        newconn.acceptConnection
+                    else:
+                        #OPTIONALLY CHECK HERE IF THE CLIENT'S PUBKEY IS OK FIRST?
+                        self.pubkey_database[ newconn.pubkey ] = self.getPubkeyNickname(newconn.pubkey)
+                        self.save_pubkey_database()
+                        newconn.acceptConnection()
+                        
                     
                     newconn.waitForAccept()
                     self.connList.append(newconn)
-                    print('===== %s@%s has joined the chat =====' % conn.getsockname())
+                    print('===== %s has joined the chat =====' %self.pubkey_database[newconn.pubkey] )
                 elif data == P2P_CHAT_NEWMESSAGE:
                     message = conn.receiveMessage()
-                    print('%s@%s: %s'%( conn.getsockname()[0], conn.getsockname()[1], message))
+                    print('%s: %s'%(self.pubkey_database[conn.pubkey], message))
 
             for conn in errored:
-                print('===== %s@%s has left the chat =====' % conn.getsockname())
+                print('===== %s has left the chat =====' %self.pubkey_database[conn.pubkey] )
                 conn.getsockname()
                 conn.close()
                 self.connList.remove(conn)
-
+    
+    
     def getPubkeyNickname(self,pubkey):
         #Generate a nickname
         newnick = gen_unique_nickname(pubkey)
-        if newnick in self.waitingList.keys() or newnick in self.pubkey_database.values(): #Hash collision or hash already set as nickname; you got extremely unlucky
-            print("ERROR: HASH COLLISION; new joining user has been assigned a nickname that already exists in your database. They have been assigned a nickname that other peers in this group will not recognize.")
-            while newnick in self.waitingList.keys() or newnick in self.pubkey_database.values():
-                newnick = gen_random_nickname()
+        if newnick in self.waitingList.keys() or newnick in self.pubkey_database.values():
+            if pubkey in self.pubkey_database.keys() or pubkey in list(map(lambda x: x.pubkey,self.waitingList.values())):
+                #Person is already connected, and is connecting a second time ?
+                pass
+            else:
+                #Hash collision or hash already set as nickname; you got extremely unlucky
+                print("ERROR: HASH COLLISION; new joining user has been assigned a nickname that already exists in your database. They have been assigned a nickname that other peers in this group will not recognize.")
+                while newnick in self.waitingList.keys() or newnick in self.pubkey_database.values():
+                    newnick = gen_random_nickname()
         return newnick
