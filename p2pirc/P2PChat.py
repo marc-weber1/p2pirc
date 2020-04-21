@@ -2,7 +2,7 @@ import asyncio, select, socket, sys, os, base64, json
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 
-from .P2PChatConnection import P2PChatConnection, makeIceConnections, _makeIceConnections
+from .P2PChatConnection import P2PChatConnection, makeIceConnections
 from .P2PChatSignals import *
 
 
@@ -63,6 +63,7 @@ class P2PChat:
         '''
         print("Connecting to %s:%d ..." %(IP,port) )
         firstconn = P2PChatConnection("JOINDIRECT",self.private_key_file,addr=[IP,port])
+        firstconn.joinDirect([IP,port])
         print("Sent public key to entrypoint. Waiting for them to accept ...")
         firstconn.waitForAccept() # Server accepts first
 
@@ -83,14 +84,19 @@ class P2PChat:
         print("  nickname: %s" %self.pubkey_database[firstconn.pubkey])
         
         
-        # Receive the number of ICE connections to make (from the server)
+        # Make 1 connection, for the entrypoint
+        print('Client: Making ice data for the server')
+        firstIceConn, firstData = asyncio.get_event_loop().run_until_complete(makeIceConnections(1, firstconn, False, True))
+        
+        print('Client: Getting number of ices to make')
+        # Receive the number of ICE connections to make (from the entrypoint)
         icesToMake = int(firstconn.receive())
         # This will hang until the server communicates with everyone else and gets their data
-        connections, datas = asyncio.get_event_loop().run_until_complete(_makeIceConnections(icesToMake, firstconn, False, True))
-        # Now do it again! Just make 1 connection this time, for the entrypoint
-        firstIceConn, firstData = asyncio.get_event_loop().run_until_complete(_makeIceConnections(1, firstconn, False, True))
+        print('Client: Making the ices for everyone else')
+        connections, datas = asyncio.get_event_loop().run_until_complete(makeIceConnections(icesToMake, firstconn, False, True))
+        print('Client: Done!')
         connections.append(firstIceConn)
-        datas.append(firstData)
+        datas.append(firstData) # Probably don't need to keep datas
         
         
         # The person we connect to will now tell everyone else to create
@@ -102,6 +108,8 @@ class P2PChat:
         self.connList = [firstconn]
         for addr in addrlist:
             conn = P2PChatConnection("JOININDIRECT",self.private_key_file,addr=addr)
+            conn.joinIndirect(addr)
+            
             conn.waitForAccept() #This blocks, more parallel way?
             if conn.pubkey in self.pubkey_database.keys():
                 conn.acceptConnection()
@@ -215,23 +223,30 @@ class P2PChat:
         newconn.acceptConnection()
         newconn.waitForAccept() #This blocks, maybe do this entire function on a new thread
         
-        numIceConns = len(self.connList) # The +1 is because the client needs to make an ice conn for us as well
-        print('Telling the client to create %s ice conns' % numIceConns)
+        print('Server: Making an ice connection for the client')
+        clientIceConn, data_ = await makeIceConnections(1, newconn, True, False)
+        
+        numIceConns = len(self.connList)
+        print('Server: Telling the client to create %s ice conns' % numIceConns)
         newconn.send(str(numIceConns))
         #print('Getting new ice data from the client')
         
         # The following lines act as an intermediary between the new client and the other people
         # all of whom are currently running makeNewIceConnections
+        print('Server: Receiving ice data from the client')
         clientIceDatas = json.loads(newconn.receive())
+        print('Server: Sending that data to the other people')
         for i in range(numIceConns):
             self.connList[i].send(json.dumps([clientIceDatas[i]]))
         otherIceDatas = []
+        print('Server: Receiving ice data from other people')
         for i in range(numIceConns):
             otherIceDatas.append(json.loads(self.connList[i].receive()))
-            
+        
+        print('Server: Sending that data to the client')
         newconn.send(json.dumps(otherIceDatas))
-        #newIceConn, newData = asyncio.ensure_future(_makeIceConnections(1, newconn, True, False))
-        newIceConn, newData = await _makeIceConnections(1, newconn, True, False)
+        #print('Server: Making our own ice connection for the client')
+        #newIceConn, newData = await makeIceConnections(1, newconn, True, False)
             
             
                     
@@ -272,6 +287,7 @@ class P2PChat:
                 if sock is self.listener: # should always be True
                     # A new client has tried to connect to our listener
                     s, addr = self.listener.accept()
+                    s.setblocking(1)
                     with s:
                         print('Received new client at', addr)
                         # Start listening for new clients right away
@@ -279,7 +295,9 @@ class P2PChat:
                         # Create a new socket - this socket will be used for
                         # communication with the new client.
                         
-                        newconn = P2PChatConnection("NEWDIRECTCLIENT",self.private_key_file,listener=s)
+                        #newconn = P2PChatConnection("NEWDIRECTCLIENT",self.private_key_file,listener=s)
+                        newconn = P2PChatConnection("NEWDIRECTCLIENT",self.private_key_file,connection=s)
+                        newconn.newDirectClient(s)
                         
                         # CHECK HERE WITH THE USER IF THE CLIENT'S PUBKEY IS OK FIRST !!!
                         # newconn.pubkey
@@ -321,6 +339,7 @@ class P2PChat:
                     # make a new socket for a new client to communicate with us
                     
                     newconn = P2PChatConnection("NEWINDIRECTCLIENT",self.private_key_file,connection=conn)
+                    await newconn.newIndirectClient(conn)
                     
                     if newconn.pubkey in self.pubkey_database.items():
                         newconn.acceptConnection()

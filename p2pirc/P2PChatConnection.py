@@ -22,36 +22,47 @@ def receivePT(sock):
     length = int.from_bytes(sock.recv(4), 'big')
     return sock.recv(length).decode('utf-8')
 
-def makeIceConnections(amount, conn, controlling, sendFirst):
-    c, d = asyncio.get_event_loop().run_until_complete(_makeIceConnections(amount, conn, controlling, sendFirst))
-    return c, d
-async def _makeIceConnections(amount, conn, controlling, sendFirst):
+async def makeIceConnections(amount, conn, controlling, sendFirst):
+    print('Making %s ice connections...' % amount)
+    print('Controlling = %s, sendFirst = %s' % (controlling, sendFirst))
     connections = []
     datas_out = []
 
     for i in range(amount):
+        print('Creating connection %s of %s' % (i+1, amount))
         connection = aioice.Connection(ice_controlling=controlling)
         connections.append(connection)
+        print('Gathering candidates...')
         await connection.gather_candidates()
+        print('asdf...')
     
     if not sendFirst:
+        print('Receiving data from other side...')
         datas = json.loads(conn.receive())
+        print('Got it!')
         for i in range(amount):
             connections[i].remote_candidates = list(map(lambda x: aioice.Candidate.from_sdp(x), datas[i][0]))
             connections[i].remote_username = datas[i][1]
             connections[i].remote_password = datas[i][2]
+    print('Generating data to send...')
     for i in range(amount):
         data_out = [list(map(lambda x: x.to_sdp(),connections[i].local_candidates)),connections[i].local_username,connections[i].local_password]
         datas_out.append(data_out)
+    print('Actually sending it...')
+    print(json.dumps(datas_out))
     conn.send(json.dumps(datas_out))
     if sendFirst:
+        print('Receiving data from other side...')
         datas = json.loads(conn.receive())
+        print('Got it!')
         for i in range(amount):
             connections[i].remote_candidates = list(map(lambda x: aioice.Candidate.from_sdp(x), datas[i][0]))
             connections[i].remote_username = datas[i][1]
             connections[i].remote_password = datas[i][2]
+    print('Attempting to connect...')
     for c in connections:
         await c.connect()
+    print('Done!\n')
     return connections, datas
 
 class P2PChatConnection:
@@ -64,8 +75,16 @@ class P2PChatConnection:
     #addr is an [IP,port], Listener is a listener socket, connection is a P2PChatConnection
     #After this, self.sock, self.addr are guaranteed to exist
     #def __init__(self,private_key_file,role="JOINCHAT",addr=None,listener=None,connection=None):
+    
     def __init__(self,role,private_key_file,addr=None,listener=None,connection=None):
         self.private_key_file = private_key_file
+        self._connection = connection
+        self._addr = addr
+        self._listener = listener
+        return
+        
+        
+        
         
         if role == "JOINDIRECT": #pwnat or open port
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -91,42 +110,102 @@ class P2PChatConnection:
                 # to our socket.
                 connection.send(json.dumps(tmpsock.getsockname()))
                 self.sock, self.addr = tmpsock.accept()'''
-            newconn_, data_ = P2PChatConnection.makeIceConnections(1, connection, True, False)
+            print('Other: Making our own ice connection for the client')
+            newconn_, data_ = asyncio.get_event_loop().run_until_complete(makeIceConnections(1, connection, True, False))
             newconn, data = newconn[0], data[0]
         elif role == "NEWDIRECTCLIENT": #pwnat or open port; don't need their IP
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
+            '''with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
                 tmpsock.bind(('127.0.0.1', 0)) #Broken on non-local right now
                 tmpsock.listen()
                 sendPT(listener, json.dumps(tmpsock.getsockname())) #ENCRYPT THIS??
-                self.sock, self.addr = tmpsock.accept()
+                self.sock, self.addr = tmpsock.accept()'''
+            print('Server: Making our own ice connection for the client')
+            newconn_, data_ = asyncio.get_event_loop().run_until_complete(makeIceConnections(1, connection, True, False))
+            newconn, data = newconn[0], data[0]
         
+        
+    def startHandshakeAsServer(self):
         # Handshake now that the socket is open
         # XX: server - confidentially receive their static pubkey, verify it, then send your static back
         self.noise = NoiseConnection.from_name(b'Noise_XX_25519_AESGCM_SHA256')
         self.noise.set_keypair_from_private_path(Keypair.STATIC, self.private_key_file)
         
-        if role == "NEWDIRECTCLIENT" or role == "NEWINDIRECTCLIENT": #"server"
-            self.noise.set_as_initiator()
-            self.noise.start_handshake()
-            eph_loc_pubkey = self.noise.write_message() #any payload?? like random numbers
+        #if role == "NEWDIRECTCLIENT" or role == "NEWINDIRECTCLIENT": #"server"
+        self.noise.set_as_initiator()
+        self.noise.start_handshake()
+        eph_loc_pubkey = self.noise.write_message() #any payload?? like random numbers
+        try:
+            # self.sock is a standard TCP socket
             self.sock.sendall(eph_loc_pubkey)
             stat_rem_pubkey = self.sock.recv(128)
-            payload = self.noise.read_message(stat_rem_pubkey)
-            self.handshake_role = "server"
-            self.pubkey = self.noise.noise_protocol.handshake_state.rs.public_bytes
-            #self.pubkey() is now guaranteed to exist
+        except AttributeError:
+            # self.sock is an ICE connection
+            self.sock.sendto(eph_loc_pubkey, 1)
+            stat_rem_pubkey, _ = self.sock.recvfrom(128)
+        payload = self.noise.read_message(stat_rem_pubkey)
+        self.handshake_role = "server"
+        self.pubkey = self.noise.noise_protocol.handshake_state.rs.public_bytes
+        #self.pubkey() is now guaranteed to exist
                 
-        elif role == "JOINDIRECT" or role == "JOININDIRECT": #"client"
-            self.noise.set_as_responder()
-            self.noise.start_handshake()
+    def startHandshakeAsClient(self):
+        # Handshake now that the socket is open
+        # XX: server - confidentially receive their static pubkey, verify it, then send your static back
+        self.noise = NoiseConnection.from_name(b'Noise_XX_25519_AESGCM_SHA256')
+        self.noise.set_keypair_from_private_path(Keypair.STATIC, self.private_key_file)
+        
+        #elif role == "JOINDIRECT" or role == "JOININDIRECT": #"client"
+        self.noise.set_as_responder()
+        self.noise.start_handshake()
+        try:
             data = self.sock.recv(128)
-            eph_rem_pubkey = self.noise.read_message(data)
-            cipher_stat_loc_pubkey = self.noise.write_message() #timestamp would be cool here? or random numbers
+        except AttributeError:
+            data, _ = self.sock.recvfrom(128)
+        eph_rem_pubkey = self.noise.read_message(data)
+        cipher_stat_loc_pubkey = self.noise.write_message() #timestamp would be cool here? or random numbers
+        
+        try:
             self.sock.sendall(cipher_stat_loc_pubkey)
-            self.handshake_role = "client"
+        except AttributeError:
+            self.sock.sendto(cipher_stat_loc_pubkey, 1)
+        self.handshake_role = "client"
         
         #THE HANDSHAKE IS NOT DONE AT THIS POINT; it will be done upon the server accepting, and then the client accepting; sending messages before then will result in an error
-    
+    def joinDirect(self, addr):
+        '''with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(tuple(addr))
+
+            # 'addr' is the ip/port of the socket we need to connect to
+            self.addr = json.loads(receivePT(s)) #ENCRYPT THIS?
+
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect(tuple(self.addr))'''
+        self.addr = addr
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect(tuple(addr))
+        print('Client: Starting handshake')
+        self.startHandshakeAsClient()
+        print('Client: Finished handshake part 1')
+    def joinIndirect(self, addr):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect(tuple(addr))
+        self.addr = addr
+        self.startHandshakeAsClient()
+    async def newIndirectClient(self, connection):
+        #print('Other: Making our own ice connection for the client')
+        self.sock = connection
+        newconn_, data_ = await makeIceConnections(1, self, True, False)
+        self.ice = newconn[0]
+        self.startHandshakeAsServer()
+    def newDirectClient(self, connection):
+        #print('Server: Making our own ice connection for the client')
+        #newconn_, data_ = await makeIceConnections(1, self, True, False)
+        #self.ice = newconn_[0]
+        #newconn_, data_ = await makeIceConnections(1, self, True, False)
+        #newconn, data = newconn[0], data[0]
+        self.sock = connection
+        print('Server: Starting handshake')
+        self.startHandshakeAsServer()
+        print('Server: Finished handshake part 1')
     
     def acceptConnection(self):
         if self.handshake_role == "server":
