@@ -59,11 +59,11 @@ class P2PChatConnection:
     person in the group chat, abstracting for who is the "server" and who is
     the "client"
     '''
-    private_key_file = "" # Maybe find a way to make this dependent on the P2PChat instance?
 
     #addr is an [IP,port], Listener is a listener socket, connection is a P2PChatConnection
     #After this, self.sock, self.addr are guaranteed to exist
-    def __init__(self,role="JOINCHAT",addr=None,listener=None,connection=None):
+    def __init__(self,private_key_file,role="JOINCHAT",addr=None,listener=None,connection=None):
+        self.private_key_file = private_key_file
         
         if role == "JOINDIRECT": #pwnat or open port
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -101,7 +101,7 @@ class P2PChatConnection:
         # Handshake now that the socket is open
         # XX: server - confidentially receive their static pubkey, verify it, then send your static back
         self.noise = NoiseConnection.from_name(b'Noise_XX_25519_AESGCM_SHA256')
-        self.noise.set_keypair_from_private_path(Keypair.STATIC, P2PChatConnection.private_key_file)
+        self.noise.set_keypair_from_private_path(Keypair.STATIC, self.private_key_file)
         
         if role == "NEWDIRECTCLIENT" or role == "NEWINDIRECTCLIENT": #"server"
             self.noise.set_as_initiator()
@@ -217,6 +217,6 @@ class P2PChatConnection:
         return self.sock.fileno()
 
     def getLocalPubkey(self):
-        with open(P2PChatConnection.private_key_file,"rb") as f:
+        with open(self.private_key_file,"rb") as f:
             privkey = X25519PrivateKey.from_private_bytes(f.read())
             return privkey.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)

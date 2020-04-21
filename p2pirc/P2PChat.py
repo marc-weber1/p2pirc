@@ -28,6 +28,7 @@ class P2PChat:
         
         #Print out the pubkey?
         #print("Our pubkey: " + str(?.public_bytes(Encoding.Raw,PublicFormat.Raw)))
+        self.private_key_file = key_file
         
         self.private_key_file = key_file
         self.ui_class = ui_class
@@ -61,7 +62,7 @@ class P2PChat:
         It assumes that we are not already connected to a room.
         '''
         print("Connecting to %s:%d ..." %(IP,port) )
-        firstconn = P2PChatConnection("JOINDIRECT",addr=[IP,port])
+        firstconn = P2PChatConnection("JOINDIRECT",self.private_key_file,addr=[IP,port])
         print("Sent public key to entrypoint. Waiting for them to accept ...")
         firstconn.waitForAccept() # Server accepts first
 
@@ -100,7 +101,7 @@ class P2PChat:
 
         self.connList = [firstconn]
         for addr in addrlist:
-            conn = P2PChatConnection("JOININDIRECT",addr=addr)
+            conn = P2PChatConnection("JOININDIRECT",self.private_key_file,addr=addr)
             conn.waitForAccept() #This blocks, more parallel way?
             if conn.pubkey in self.pubkey_database.keys():
                 conn.acceptConnection()
@@ -277,7 +278,7 @@ class P2PChat:
                         # Create a new socket - this socket will be used for
                         # communication with the new client.
                         
-                        newconn = P2PChatConnection("NEWDIRECTCLIENT",listener=s)
+                        newconn = P2PChatConnection("NEWDIRECTCLIENT",self.private_key_file,listener=s)
                         
                         # CHECK HERE WITH THE USER IF THE CLIENT'S PUBKEY IS OK FIRST !!!
                         # newconn.pubkey
@@ -318,7 +319,7 @@ class P2PChat:
                     # Someone else (call this person C) is telling us to
                     # make a new socket for a new client to communicate with us
                     
-                    newconn = P2PChatConnection("NEWINDIRECTCLIENT",connection=conn)
+                    newconn = P2PChatConnection("NEWINDIRECTCLIENT",self.private_key_file,connection=conn)
                     
                     if newconn.pubkey in self.pubkey_database.items():
                         newconn.acceptConnection()
