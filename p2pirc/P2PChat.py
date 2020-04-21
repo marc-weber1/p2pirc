@@ -4,7 +4,7 @@ from cryptography.hazmat.primitives import hashes
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from .P2PChatConnection import P2PChatConnection
+from .P2PChatConnection import P2PChatConnection, makeIceConnections
 from .P2PChatSignals import *
 
 
@@ -53,7 +53,7 @@ class P2PChat:
                 print("Pubkeys saved to %s." %self.key_database_filename)
             except IOError:
                 print("ERROR: Failed to save the pubkey database %s. Any peers accepted during this group chat will not be saved as trusted.")
-        
+    
     def connect(self, IP, port):
         '''
         This function should be run to connect to an already existing room.
@@ -79,6 +79,16 @@ class P2PChat:
             
         print("  pubkey: %s" %base64.b64encode(firstconn.pubkey).decode("utf-8"))
         print("  nickname: %s" %self.pubkey_database[firstconn.pubkey])
+        
+        
+        # Receive the number of ICE connections to make (from the server)
+        icesToMake = int(firstconn.receive())
+        # This will hang until the server communicates with everyone else and gets their data
+        connections, datas = makeIceConnections(icesToMake, firstconn, False, True)
+        # Now do it again! Just make 1 connection this time, for the entrypoint
+        firstIceConn, firstData = makeIceConnections(1, firstconn, False, True)
+        connections.append(firstIceConn)
+        datas.append(firstData)
         
         
         # The person we connect to will now tell everyone else to create
@@ -203,6 +213,25 @@ class P2PChat:
     
         newconn.acceptConnection()
         newconn.waitForAccept() #This blocks, maybe do this entire function on a new thread
+        
+        numIceConns = len(self.connList) # The +1 is because the client needs to make an ice conn for us as well
+        print('Telling the client to create %s ice conns' % numIceConns)
+        newconn.send(str(numIceConns))
+        #print('Getting new ice data from the client')
+        
+        # The following lines act as an intermediary between the new client and the other people
+        # all of whom are currently running makeNewIceConnections
+        clientIceDatas = json.loads(newconn.receive())
+        for i in range(numIceConns):
+            self.connList[i].send(json.dumps([clientIceDatas[i]]))
+        otherIceDatas = []
+        for i in range(numIceConns):
+            otherIceDatas.append(json.loads(self.connList[i].receive()))
+            
+        newconn.send(json.dumps(otherIceDatas))
+        newIceConn, newData = makeIceConnections(1, newconn, True, False)
+            
+            
                     
         print('===== %s has joined the chat =====' %self.pubkey_database[newconn.pubkey] )
 
@@ -288,10 +317,11 @@ class P2PChat:
                 elif data == P2P_CHAT_NEWCONNECTION:
                     # Someone else (call this person C) is telling us to
                     # make a new socket for a new client to communicate with us
+                    
                     newconn = P2PChatConnection("NEWINDIRECTCLIENT",connection=conn)
                     
                     if newconn.pubkey in self.pubkey_database.items():
-                        newconn.acceptConnection
+                        newconn.acceptConnection()
                     else:
                         #OPTIONALLY CHECK HERE IF THE CLIENT'S PUBKEY IS OK FIRST?
                         self.pubkey_database[ newconn.pubkey ] = self.getPubkeyNickname(newconn.pubkey)

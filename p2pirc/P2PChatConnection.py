@@ -1,3 +1,4 @@
+import asyncio
 import socket, json
 import string
 from noise.connection import NoiseConnection, Keypair
@@ -20,6 +21,37 @@ def receivePT(sock):
     length = int.from_bytes(sock.recv(4), 'big')
     return sock.recv(length).decode('utf-8')
 
+def makeIceConnections(amount, conn, controlling, sendFirst):
+    c, d = asyncio.get_event_loop().run_until_complete(_makeIceConnections(amount, conn, controlling, sendFirst))
+    return c, d
+async def _makeIceConnections(amount, conn, controlling, sendFirst):
+    connections = []
+    datas_out = []
+
+    for i in range(amount):
+        connection = aioice.Connection(ice_controlling=controlling)
+        connections.append(connection)
+        await connection.gather_candidates()
+    
+    if not sendFirst:
+        datas = json.loads(conn.receive())
+        for i in range(amount):
+            connections[i].remote_candidates = list(map(lambda x: aioice.Candidate.from_sdp(x), datas[i][0]))
+            connections[i].remote_username = datas[i][1]
+            connections[i].remote_password = datas[i][2]
+    for i in range(amount):
+        data_out = [list(map(lambda x: x.to_sdp(),connections[i].local_candidates)),connections[i].local_username,connections[i].local_password]
+        datas_out.append(data_out)
+    conn.send(json.dumps(data_out))
+    if sendFirst:
+        datas = json.loads(conn.receive())
+        for i in range(amount):
+            connections[i].remote_candidates = list(map(lambda x: aioice.Candidate.from_sdp(x), datas[i][0]))
+            connections[i].remote_username = datas[i][1]
+            connections[i].remote_password = datas[i][2]
+    for c in connections:
+        await c.connect()
+    return connections, datas
 
 class P2PChatConnection:
     '''
@@ -47,7 +79,7 @@ class P2PChatConnection:
             self.sock.connect(tuple(addr))
             self.addr = addr
         elif role == "NEWINDIRECTCLIENT": #chownat
-            target_addr = json.loads(connection.receive())
+            '''target_addr = json.loads(connection.receive())
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
                 tmpsock.bind(('127.0.0.1', 0)) #Broken on non-local right now
                 tmpsock.listen()
@@ -56,7 +88,9 @@ class P2PChatConnection:
                 # C will then send this to the new client, who will connect
                 # to our socket.
                 connection.send(json.dumps(tmpsock.getsockname()))
-                self.sock, self.addr = tmpsock.accept()
+                self.sock, self.addr = tmpsock.accept()'''
+            newconn_, data_ = P2PChatConnection.makeIceConnections(1, connection, True, False)
+            newconn, data = newconn[0], data[0]
         elif role == "NEWDIRECTCLIENT": #pwnat or open port; don't need their IP
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tmpsock:
                 tmpsock.bind(('127.0.0.1', 0)) #Broken on non-local right now
