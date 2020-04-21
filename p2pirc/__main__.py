@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat
 
 from .P2PChat import P2PChat
 from .P2PChatConnection import P2PChatConnection
+from .PromptUI import PromptUI
 
 DEFAULT_LISTENING_PORT = 8123 #Needs this port for the server, and one more port for each person in the chat, 0 means the OS chooses a free port
 
@@ -68,7 +69,7 @@ def main():
         
     #Everything is good at this point, start the class
     
-    con = P2PChat(args.entrypoint,args.key_database,args.key_file)
+    con = P2PChat(args.entrypoint,args.key_database,args.key_file,PromptUI)
     if args.new:
         con.createNewRoom()
     else:
