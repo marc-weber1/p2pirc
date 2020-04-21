@@ -84,9 +84,9 @@ class P2PChat:
         # Receive the number of ICE connections to make (from the server)
         icesToMake = int(firstconn.receive())
         # This will hang until the server communicates with everyone else and gets their data
-        connections, datas = makeIceConnections(icesToMake, firstconn, False, True)
+        connections, datas = asyncio.ensure_future(_makeIceConnections(icesToMake, firstconn, False, True))
         # Now do it again! Just make 1 connection this time, for the entrypoint
-        firstIceConn, firstData = makeIceConnections(1, firstconn, False, True)
+        firstIceConn, firstData = asyncio.ensure_future(_makeIceConnections(1, firstconn, False, True))
         connections.append(firstIceConn)
         datas.append(firstData)
         
@@ -229,7 +229,7 @@ class P2PChat:
             otherIceDatas.append(json.loads(self.connList[i].receive()))
             
         newconn.send(json.dumps(otherIceDatas))
-        newIceConn, newData = makeIceConnections(1, newconn, True, False)
+        newIceConn, newData = asyncio.ensure_future(_makeIceConnections(1, newconn, True, False))
             
             
                     
