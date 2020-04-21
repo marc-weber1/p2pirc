@@ -2,7 +2,7 @@ import asyncio, select, socket, sys, os, base64, json
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 
-from .P2PChatConnection import P2PChatConnection, makeIceConnections
+from .P2PChatConnection import P2PChatConnection, makeIceConnections, _makeIceConnections
 from .P2PChatSignals import *
 
 
@@ -86,9 +86,9 @@ class P2PChat:
         # Receive the number of ICE connections to make (from the server)
         icesToMake = int(firstconn.receive())
         # This will hang until the server communicates with everyone else and gets their data
-        connections, datas = asyncio.ensure_future(_makeIceConnections(icesToMake, firstconn, False, True))
+        connections, datas = asyncio.get_event_loop().run_until_complete(_makeIceConnections(icesToMake, firstconn, False, True))
         # Now do it again! Just make 1 connection this time, for the entrypoint
-        firstIceConn, firstData = asyncio.ensure_future(_makeIceConnections(1, firstconn, False, True))
+        firstIceConn, firstData = asyncio.get_event_loop().run_until_complete(_makeIceConnections(1, firstconn, False, True))
         connections.append(firstIceConn)
         datas.append(firstData)
         
@@ -210,7 +210,7 @@ class P2PChat:
                 for conn in self.connList:
                     conn.sendMessage(result)
 
-    def acceptDirectClient(self,newconn): #newconn should be a P2PChatConnection
+    async def acceptDirectClient(self,newconn): #newconn should be a P2PChatConnection
     
         newconn.acceptConnection()
         newconn.waitForAccept() #This blocks, maybe do this entire function on a new thread
@@ -230,7 +230,8 @@ class P2PChat:
             otherIceDatas.append(json.loads(self.connList[i].receive()))
             
         newconn.send(json.dumps(otherIceDatas))
-        newIceConn, newData = asyncio.ensure_future(_makeIceConnections(1, newconn, True, False))
+        #newIceConn, newData = asyncio.ensure_future(_makeIceConnections(1, newconn, True, False))
+        newIceConn, newData = await _makeIceConnections(1, newconn, True, False)
             
             
                     
@@ -283,7 +284,7 @@ class P2PChat:
                         # CHECK HERE WITH THE USER IF THE CLIENT'S PUBKEY IS OK FIRST !!!
                         # newconn.pubkey
                         if newconn.pubkey in self.pubkey_database.keys():
-                            self.acceptDirectClient(newconn)
+                            await self.acceptDirectClient(newconn)
                         else:
                             newnick = self.getPubkeyNickname(newconn.pubkey)
                             #Tell the user there's someone new to accept

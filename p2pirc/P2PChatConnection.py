@@ -1,8 +1,9 @@
 import asyncio
 import socket, json
 import string
-from noise.connection import NoiseConnection, Keypair
 
+import aioice
+from noise.connection import NoiseConnection, Keypair
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import PublicFormat
 from cryptography.hazmat.primitives.serialization import Encoding
@@ -42,7 +43,7 @@ async def _makeIceConnections(amount, conn, controlling, sendFirst):
     for i in range(amount):
         data_out = [list(map(lambda x: x.to_sdp(),connections[i].local_candidates)),connections[i].local_username,connections[i].local_password]
         datas_out.append(data_out)
-    conn.send(json.dumps(data_out))
+    conn.send(json.dumps(datas_out))
     if sendFirst:
         datas = json.loads(conn.receive())
         for i in range(amount):
@@ -62,7 +63,8 @@ class P2PChatConnection:
 
     #addr is an [IP,port], Listener is a listener socket, connection is a P2PChatConnection
     #After this, self.sock, self.addr are guaranteed to exist
-    def __init__(self,private_key_file,role="JOINCHAT",addr=None,listener=None,connection=None):
+    #def __init__(self,private_key_file,role="JOINCHAT",addr=None,listener=None,connection=None):
+    def __init__(self,role,private_key_file,addr=None,listener=None,connection=None):
         self.private_key_file = private_key_file
         
         if role == "JOINDIRECT": #pwnat or open port
